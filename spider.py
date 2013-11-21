@@ -19,7 +19,7 @@ def lognormpdf(x, mu, s):
 	    numerator = -0.5 * sp.sparse.linalg.spsolve(s, diff).T.dot(diff)
 	else:
 		numerator = -0.5 * np.linalg.solve(s, diff).T.dot(diff)
-	print (numerator, denominator, np.linalg.slogdet(s)[1], len(s) * math.log(2 * math.pi))
+	#print (numerator, denominator, np.linalg.slogdet(s)[1], len(s) * math.log(2 * math.pi))
 	return numerator - denominator
 
 def aic(maximumLogLikelihood, numParameters):
@@ -109,8 +109,10 @@ class StochasticProcess:
 		self.paramsMax = paramsMax
 	def maximumLogLikelihood(self, trajectory):
 		if trajectory.dim == 1:
-			result = opt.minimize(lambda x: -self.transformedPDF(x, trajectory), map(lambda x, y: 0.5 * (x + y), self.paramsMin, self.paramsMax), method="TNC", bounds=map(lambda x, y: (x, y), self.paramsMin, self.paramsMax))
+			result = opt.minimize(lambda x: -self.transformedPDF(x, trajectory), map(lambda x, y: 0.5 * (x + y), self.paramsMin, self.paramsMax), method="TNC", bounds=map(lambda x, y: (x, y), self.paramsMin, self.paramsMax), options={'disp': False})
 			return [self.logPDF(result.x, trajectory), result.x]
+			#result = opt.brute(lambda x: -self.transformedPDF(x, trajectory), ranges=map(lambda x, y: (x, y), self.paramsMin, self.paramsMax), disp=False)
+			#return [self.logPDF(result, trajectory), result]
 		else:
 			raise NotImplementedError("Only one dimensional trajectories are currently supported")
 	#transformedPDF should be an increasing function of the PDF, e.g., log(pdf(params, trajectory))
@@ -187,22 +189,75 @@ class FractionalBrownianMotion1D(StochasticProcess):
 	def getHurstExponent(self, params):
 		return params[1]
 
+#for lm, we have to import a C library to compute the log-likelihood
+lmlib = np.ctypeslib.load_library('lm', '.')
+lmLogLikelihood = lmlib.log_likelihood
+lmLogLikelihood.restype = ctypes.c_double
+lmLogLikelihood.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), ctypes.c_int]
+class LevyMotion1D(StochasticProcess):
+	def logPDF(self, params, trajectory):
+		dxs = trajectory.getDisplacements1D(0)
+		dts = trajectory.getDts()
+		return lmLogLikelihood(self.getAlpha(params), self.getBeta(params), 0., self.getLambda(params), np.array(dts, dtype=np.float64), np.array(dxs, dtype=np.float64), trajectory.len() - 1)
+	def transformedPDF(self, params, trajectory):
+		return self.logPDF(params, trajectory)
+	def getAlpha(self, params):
+		return params[0]
+	def getBeta(self, params):
+		return params[1]
+	def getLambda(self, params):
+		return params[2]
+
+#for lm, we have to import a C library to compute the log-likelihood
+symlmLogLikelihood = lmlib.sym_log_likelihood
+symlmLogLikelihood.restype = ctypes.c_double
+symlmLogLikelihood.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), ctypes.c_int]
+class SymmetricLevyMotion1D(LevyMotion1D):
+	def logPDF(self, params, trajectory):
+		dxs = trajectory.getDisplacements1D(0)
+		dts = trajectory.getDts()
+		return symlmLogLikelihood(self.getAlpha(params), 0., self.getLambda(params), np.array(dts, dtype=np.float64), np.array(dxs, dtype=np.float64), trajectory.len() - 1)
+	def getAlpha(self, params):
+		return params[0]
+	def getBeta(self, params):
+		return 0.
+	def getLambda(self, params):
+		return params[1]
+
+class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):
+	def logPDF(self, params, trajectory):
+		dxs = trajectory.getDisplacements1D(0)
+		dts = trajectory.getDts()
+		return symlmLogLikelihood(self.getAlpha(params), self.getVelocity(params), self.getLambda(params), np.array(dts, dtype=np.float64), np.array(dxs, dtype=np.float64), trajectory.len() - 1)
+	def getVelocity(self, params):
+		return params[2]
+
+
 def testCode():
 	s = Spider("traject_1.yaml")
 	#s = Spider("test.yaml")
 	bm = BrownianMotion1D([0.1], [10.0])
 	bmd = BrownianMotionWithDrift1D([0.1, -1], [10.0, 1])
 	fbm = FractionalBrownianMotion1D([0.1, 0.1], [10.0, 0.9])
+	lm = LevyMotion1D([0.5, -1., 0.1], [2.0, 1., 10.0])
+	slm = SymmetricLevyMotion1D([0.5, 0.1], [1.99, 10.0])
+	slmd = SymmetricLevyMotionWithDrift1D([0.5, 0.1, 0.1], [1.99, 10.0, 10.])
 	traj = s.getTrajectory(0)
-	#for i in range(0, 20):
-		#traj = BrownianMotion1D.getTrajectory([2.345], range(1, 100))
+	"""
+	for i in range(0, 20):
+		traj = BrownianMotion1D.getTrajectory([2.345], range(1, 100))
 		#traj = Trajectory([[1, 1], [2, 2], [3, 1], [4, 0]])
 		#print "bm: " + str(bm.logPDF([10.], traj))
 		#pos = traj.getPositions1D(0)
 		#print "v: " + str((pos[-1] - pos[0]) / (len(pos) - 1)) + ", sigma: " + str(math.sqrt(sum(map(lambda x: x * x, diff(pos))) / (len(pos) - 2)))
-		#print "aicc: " + str(traj.aicc1D(0, [fbm]))
-	traj = BrownianMotion1D.getTrajectory([2.345], range(1, 300))
-	print "aicc: " + str(traj.aicc1D(0, [fbm]))
+		print "aicc: " + str(traj.aicc1D(0, [lm]))
+		"""
+	#traj = BrownianMotion1D.getTrajectory([2.345], range(1, 100))
+	print "aicc: " + str(traj.aicc1D(0, [bm, bmd, fbm, slm, slmd]))
+	#print "aicc: " + str(traj.aicc1D(0, [slmd]))
+	#print slm.logPDF([2., 1. / 1.414213  ], traj)
+	#print lm.logPDF([2., 0., 1. / 1.414213 ], traj)
+	#print bm.logPDF([1.], traj)
 	#print fbm.logPDF([ 1.40676782,  0.80235562], traj)
 	#print fbm.pylogPDF([ 1.40676782,  0.80235562], traj)
 
