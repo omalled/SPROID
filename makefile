@@ -7,4 +7,4 @@ lm.so: lm.c astable/astable.c astable/pqueue.c astable/interpolation.c
 	gcc -o lm.so -shared lm.c astable/astable.c astable/pqueue.c astable/interpolation.c -L/opt/local/lib -lgsl
 
 clean:
-	rm fbm.so
+	rm fbm.so lm.so
