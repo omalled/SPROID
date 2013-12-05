@@ -7,7 +7,10 @@ import scipy.stats as stat
 import numpy as np
 import operator
 import ctypes
+import multiprocessing
+import subprocess
 from StringIO import StringIO
+import matplotlib.pyplot as plt
 
 def subselect(lst, indices):
 	return map(lambda x: x[1], filter(lambda y: y[0] in indices, enumerate(lst)))
@@ -132,6 +135,12 @@ class Trajectory:
 		mlList = map(lambda p: p.maximumLogLikelihood(traj1D), stochasticProcesses)
 		#mlList is a list of lists containing the maximum likelihood and the maximum likelihood parameters
 		return map(lambda x: (aic(x[0], len(x[1])), x[0], x[1]), mlList)
+	def plot1D(self, posIndex, xlabel='Time', ylabel='Position', show=True):
+		plt.plot(self.getTimes(), self.getPositions1D(posIndex))
+		plt.xlabel(xlabel)
+		plt.ylabel(ylabel)
+		if show:
+			plt.show()
 
 class StochasticProcess:
 	paramsMin = []
@@ -366,10 +375,10 @@ slm = SymmetricLevyMotion1D([0.5, 0.1], [1.999, 10.0])
 slmd = SymmetricLevyMotionWithDrift1D([0.5, 0.1, -10.], [1.999, 10.0, 10.])
 defaultSPs = [bm, bmd, fbm, slm, slmd]
 
-slowbm = BrownianMotion1D([1e-20], [1e-1])
-slowbmd = BrownianMotionWithDrift1D([1e-20, -1], [1e-1, 1])
-slowfbm = FractionalBrownianMotion1D([1e-20, 0.1], [1e-1, 0.9])
-slowslm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1])
+slowbm = BrownianMotion1D([1e-20], [1e-1], logParams=[True])
+slowbmd = BrownianMotionWithDrift1D([1e-20, -1e-3], [1e-1, 1e-3], logParams=[True, False])
+slowfbm = FractionalBrownianMotion1D([1e-20, 0.1], [1e-1, 0.9], logParams=[True, False])
+slowslm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1], logParams=[False, True])
 slowslmd = SymmetricLevyMotionWithDrift1D([0.5, 1e-20, -1], [1.999, 1e-1, 1.])
 slowSPs = [slowbm, slowbmd, slowfbm, slowslm, slowslmd]
 
@@ -379,7 +388,7 @@ def testFracture():
 	results = traj.aic1D(0, [bm, bmd, fbm, slm])
 	return results
 
-def runFracture(filenum, posIndex):
+def runFracture(filenum, posIndex=0):
 	s = Spider("fracture/traject_" + str(filenum) + ".yaml", downsamples=50)
 	traj = s.getTrajectory(0)
 	traj = traj.getTrajectory1D(posIndex)
@@ -409,9 +418,85 @@ def runFracture(filenum, posIndex):
 	outfile.write(str(results[3][2][0]) + " " + str(results[3][2][1]) + "\n")
 	outfile.close()
 
+def runFracture1(i):
+	runFracture(i, 1)
+
+def runFracture2(i):
+	runFracture(i, 2)
+
 def runFractures():
-	#n = 2784
-	n = 4
-	map(runFracture, range(1, n), map(lambda x: 0, range(1, n)))
-	map(runFracture, range(1, n), map(lambda x: 1, range(1, n)))
-	map(runFracture, range(1, n), map(lambda x: 2, range(1, n)))
+	n = 2784
+	#n = 6
+	pool = multiprocessing.Pool(4)
+	pool.map(runFracture, range(1, n))
+	pool.map(runFracture1, range(1, n))
+	pool.map(runFracture2, range(1, n))
+	#pool.map(runFracture, range(1, n), map(lambda x: 0, range(1, n)))
+	#pool.map(runFracture, range(1, n), map(lambda x: 1, range(1, n)))
+	#pool.map(runFracture, range(1, n), map(lambda x: 2, range(1, n)))
+
+#runFractures()
+
+def runSplit():
+	n = 100
+	pool = multiprocessing.Pool(4)
+	pool.map(runSplitSupport, range(0, n))
+
+def runSplitSupport(k):
+	s = Spider("split/tracks.txt.yaml", downsamples=50)
+	traj2D = s.getTrajectory(k)
+	if traj2D.getPositions1D(0)[-1] > 0:
+		for j in range(0, 2):
+			traj = traj2D.getTrajectory1D(j)
+			results = traj.aic1D(0, [slowbm, slowbmd, slowfbm, slowslm])
+			minaic = results[0][0]
+			for i in range(1, 4):
+				if results[i][0] < minaic:
+					minaic = results[i][0]
+			outfile = open("split/traject_" + str(k) + ".results" + str(j), "w")
+			for i in range(0, 4):
+				if results[i][0] == minaic:
+					if i == 0:
+						outfile.write("BM\n")
+					if i == 1:
+						outfile.write("BMD\n")
+					if i == 2:
+						outfile.write("FBM\n")
+					if i == 3:
+						outfile.write("SLM\n")
+			outfile.write("BM " + str(results[0][0]) + "\n")
+			outfile.write(str(results[0][2][0]) + "\n")
+			outfile.write("BMD " + str(results[1][0]) + "\n")
+			outfile.write(str(results[1][2][0]) + " " + str(results[1][2][1]) + "\n")
+			outfile.write("FBM " + str(results[2][0]) + "\n")
+			outfile.write(str(results[2][2][0]) + " " + str(results[2][2][1]) + "\n")
+			outfile.write("SLM " + str(results[3][0]) + "\n")
+			outfile.write(str(results[3][2][0]) + " " + str(results[3][2][1]) + "\n")
+			outfile.close()
+
+#runSplit()
+
+def summarizeResults(folder):
+	lsOutput = subprocess.check_output("ls -1 " + folder + "/*.results2", shell=True)
+	filenames = lsOutput.split('\n')
+	winnerCount = {}
+	winnerCount["BM"] = 0
+	winnerCount["BMD"] = 0
+	winnerCount["FBM"] = 0
+	winnerCount["SLM"] = 0
+	mlParams = [[], [], [], []]
+	aics = [[], [], [], []]
+	for filename in filenames[0:-1]:
+		#f = open(folder + "/" + filename, "r")
+		f = open(filename, "r")
+		lines = f.readlines()
+		f.close()
+		winnerCount[lines[0].rstrip()] += 1
+		for i in range(0, 4):
+			chunks = lines[1 + 2 * i].split(" ")
+			aics[i].append(float(chunks[1]))
+			chunks = lines[2 + 2 * i].split(" ")
+			mlParams[i].append(map(float, chunks))
+	print winnerCount
+	print map(lambda x: sum(x) / float(len(x)), aics)
+	print map(lambda x: map(lambda y: sum(y) / float(len(y)), zip(*x)), mlParams)

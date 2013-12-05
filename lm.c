@@ -26,9 +26,7 @@ double sym_log_likelihood(double alpha, double gamma, double lambda, const doubl
 		{
 			z = dx[i] + (btan * lambda - gamma) * dt[i];
 			z /= lambda * pow(dt[i], 1. / alpha);
-			printf("a\n");
 			symmetric_astable_pdf_interp(z, alpha, 0., 1., &retval);
-			printf("b\n");
 			z = standard_astable_pdf(z, alpha, 0.);
 			retval /= lambda * pow(dt[i], 1. / alpha);
 			if(retval == 0) return -1. / 0.;
