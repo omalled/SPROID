@@ -11,6 +11,7 @@ import multiprocessing
 import subprocess
 from StringIO import StringIO
 import matplotlib.pyplot as plt
+import levy
 
 def subselect(lst, indices):
 	return map(lambda x: x[1], filter(lambda y: y[0] in indices, enumerate(lst)))
@@ -40,37 +41,27 @@ def aicc(maximumLogLikelihood, numParameters, numSamples):
 
 class Spider:
 	trajectories = []
-	def __init__(self, filename, downsamples=[]):
-		stream = file(filename, "r")
-		data = yaml.load(stream)
-		self.trajectories = map(lambda x: Trajectory(x, downsamples), data["Trajectories"])
+	def __init__(self, filename=[], downsamples=[], trajectories=[]):
+		self.trajectories = trajectories
+		if filename != []:
+			stream = file(filename, "r")
+			data = yaml.load(stream)
+			self.trajectories.extend(map(lambda x: Trajectory(x, downsamples), data["Trajectories"]))
 	def getTrajectories(self):
 		return self.trajectories
 	def getTrajectory(self, i):
 		return self.getTrajectories()[i]
 	def getNumTrajectories(self):
 		return len(self.trajectories)
-	def aicOneTrajectory1D(self, trajIndex, posIndex):
-		bm = BrownianMotion1D([1e-20], [1e-1], logParams=[True])
-		bmres = self.getTrajectory(trajIndex).aic1D(posIndex, [bm])
-		print bmres
-		#bmd = BrownianMotionWithDrift1D([1e-20, -1], [1e-1, 1], params0=[bmres[0][0], 0.])
-		bmd = BrownianMotionWithDrift1D([1e-20, -1], [1e-1, 1], logParams=[True, False])
-		bmdres = self.getTrajectory(trajIndex).aic1D(posIndex, [bmd])
-		print bmdres
-		#fbm = FractionalBrownianMotion1D([1e-20, 0.1], [1e-1, 0.9], params0=[bmres[0][0], 0.5])
-		fbm = FractionalBrownianMotion1D([1e-20, 0.1], [1e-1, 0.9], logParams=[True, False])
-		fbmres = self.getTrajectory(trajIndex).aic1D(posIndex, [fbm])
-		print fbmres
-		#slm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1], params0=[1.999, bmres[0][0] / math.sqrt(2)])
-		slm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1], logParams=[False, True])
-		slmres = self.getTrajectory(trajIndex).aic1D(posIndex, [slm])
-		print slmres
-		#slmd = SymmetricLevyMotionWithDrift1D([0.5, 1e-20, -1.], [1.999, 1e-1, 1.], params0=[slmres[0][0], slmres[0][1], 0.])
-		slmd = SymmetricLevyMotionWithDrift1D([0.5, 1e-20, -1.], [1.999, 1e-1, 1.], logParams=[False, True, False])
-		slmdres = self.getTrajectory(trajIndex).aic1D(posIndex, [slmd])
-		print slmdres
-		return [bmres, bmdres, fbmres, slmres, slmdres]
+	def aicOneTrajectory1D(self, trajIndex, posIndex, sps=[]):
+		if sps == []:
+			sps = defaultSPs
+		results = []
+		for sp in sps:
+			result = self.getTrajectory(trajIndex).aic1D(posIndex, [sp])[0]
+			results.append(result)
+			#print result
+		return results
 
 class Trajectory:
 	dim = 0
@@ -161,6 +152,8 @@ class StochasticProcess:
 			else:
 				self.paramsMin[i] = paramsMin[i]
 				self.paramsMax[i] = paramsMax[i]
+	def getNumParams(self):
+		raise NotImplementedError("This needs to be implemented in each subclass")
 	def transformParam(self, params, i):
 		if self.logParams[i]:
 			return math.pow(10, params[i])
@@ -195,10 +188,67 @@ class StochasticProcess:
 	def logPDF(self, params, trajectory):
 		raise NotImplementedError("This needs to be implemented in each subclass")
 	@staticmethod
-	def getTrajectory(params, times):
+	def getTrajectory(params, times, num_trajs=1):
+		raise NotImplementedError("This needs to be implemented in each subclass")
+	def name(self):
 		raise NotImplementedError("This needs to be implemented in each subclass")
 
+class StochasticProcessWithNonlinearClock(StochasticProcess):
+	def __init__(self, parentProcessClass, clock, paramsMin, paramsMax, params0=[], logParams=[]):
+		"""Constructs a StochasticProcess with a nonlinear clock based on the parent process
+
+		If the parent_process has N parameters, then the first N elements of paramsMin and
+		paramsMax should correspond to those parameters the remaining parameters are clock
+		parameters.
+
+		"""
+		StochasticProcess.__init__(self, paramsMin, paramsMax, params0, logParams)
+		self.clock = clock
+		self.parentProcess = parentProcessClass(paramsMin, paramsMax, params0, logParams)
+		self.parentProcessClass = parentProcessClass
+	def name(self):
+		return self.parentProcess.name() + " with a nonlinear clock"
+	def getNumParams(self):
+		return len(paramsMin)
+	def transformedPDF(self, params, trajectory):
+		return self.logPDF(params, trajectory)
+	def logPDF(self, params, trajectory):
+		clockTimes = map(lambda t: self.clock(t, params, self.parentProcess.getNumParams()), trajectory.getTimes())
+		positions = trajectory.getPositions1D(0)
+		timeChangedTrajectory = Trajectory(map(list, zip(clockTimes, positions)))
+		return self.parentProcess.logPDF(params, timeChangedTrajectory)
+	@staticmethod
+	def getTrajectory(params, times, num_trajs=1, clock=lambda t, p, i: math.pow(t, p[i]), parentProcessClass=[]):
+		"""Generates a trajectory of a stochastic process with a nonlinear clock
+
+		times should all be non-negative and increasing
+		"""
+		if parentProcessClass == []:
+			print "You must specify a parent class"
+		parentProcess = parentProcessClass(params, params)
+		clockTimes = map(lambda t: clock(t, params, parentProcess.getNumParams()), times)
+		parentTrajectories = parentProcessClass.getTrajectory(params, clockTimes, num_trajs)
+		nlcTrajectories = map(lambda x: Trajectory(map(list, zip(times, *x))), map(lambda y: y.getPositions(), parentTrajectories))
+		return nlcTrajectories
+	@staticmethod
+	def test(params=[1., 1.5], num_trajs=50):
+		trajs = StochasticProcessWithNonlinearClock.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs, parentProcessClass=BrownianMotion1D)
+		s = Spider(trajectories=trajs)
+		sps = [bmplc, bm, fbm, slm]
+		param_results = [[] for sp in sps]
+		results = []
+		for i in range(0, num_trajs):
+			result = s.aicOneTrajectory1D(i, 0, sps=sps)
+			results.append(result)
+			for j in range(0, len(sps)):
+				param_results[j].append(result[j][2])
+		summarizeResultsList(results, sps)
+
 class BrownianMotion1D(StochasticProcess):
+	def name(self):
+		return "Brownian motion 1D"
+	def getNumParams(self):
+		return 1
 	def transformedPDF(self, params, trajectory):
 		return self.logPDF(params, trajectory)
 	def logPDF(self, params, trajectory):
@@ -212,19 +262,40 @@ class BrownianMotion1D(StochasticProcess):
 	def getSigma(self, params):
 		return self.transformParam(params, 0)
 	@staticmethod
-	def getTrajectory(params, times):
+	def getTrajectory(params, times, num_trajs=1):
 		"""Generates a trajectory of a Brownian Motion in 1 dimension.
 
 		times should all be non-negative and increasing
 		"""
-		previousT = 0
-		sigma = params[0]
-		x = [stat.norm.rvs(loc=0, scale=sigma*times[0])]
-		for dt in diff(times):
-			x.append(stat.norm.rvs(loc=x[-1], scale=sigma * math.sqrt(dt)))
-		return Trajectory(map(lambda t, pos: [t, pos], times, x))
+		if num_trajs > 1:
+			return map(lambda x: BrownianMotion1D.getTrajectory(params, times, num_trajs=1)[0], range(0, num_trajs))
+		else:
+			previousT = 0
+			sigma = params[0]
+			x = [stat.norm.rvs(loc=0, scale=sigma*times[0])]
+			for dt in diff(times):
+				x.append(stat.norm.rvs(loc=x[-1], scale=sigma * math.sqrt(dt)))
+			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
+	@staticmethod
+	def test(params=[1.], num_trajs=50):
+		trajs = BrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
+		s = Spider(trajectories=trajs)
+		sps = [bm, fbm, slm]
+		param_results = [[] for sp in sps]
+		results = []
+		for i in range(0, num_trajs):
+			print i
+			result = s.aicOneTrajectory1D(i, 0, sps=sps)
+			results.append(result)
+			for j in range(0, len(sps)):
+				param_results[j].append(result[j][2])
+		summarizeResultsList(results, sps)
 
 class BrownianMotionWithDrift1D(BrownianMotion1D):
+	def name(self):
+		return "Brownian motion with drift 1D"
+	def getNumParams(self):
+		return 2
 	def logPDF(self, params, trajectory):
 		dxs = trajectory.getDisplacements1D(0)
 		dts = trajectory.getDts()
@@ -244,6 +315,10 @@ fbmLogLikelihood = fbmlib.log_likelihood
 fbmLogLikelihood.restype = ctypes.c_double
 fbmLogLikelihood.argtypes = [ctypes.c_double, ctypes.c_double, np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), ctypes.c_int]
 class FractionalBrownianMotion1D(StochasticProcess):
+	def name(self):
+		return "Fractional Brownian motion 1D"
+	def getNumParams(self):
+		return 2
 	def covarianceMatrix(self, params, trajectory):
 		sigma = self.getSigma(params)
 		sigma2 = sigma * sigma
@@ -260,6 +335,61 @@ class FractionalBrownianMotion1D(StochasticProcess):
 		return self.transformParam(params, 0)
 	def getHurstExponent(self, params):
 		return self.transformParam(params, 1)
+	@staticmethod
+	def getTrajectory(params, times, num_trajs=1):
+		"""Generates a trajectory of a fractional Brownian motion in 1 dimension.
+
+		times should all be non-negative and increasing
+		"""
+		t0 = times[0]
+		previousT = 0
+		sigma = params[0]
+		H = params[1]
+		if t0 == 0:
+			chol_covar = FractionalBrownianMotion1D.getCholCovar(params, times[1:])
+		else:
+			chol_covar = FractionalBrownianMotion1D.getCholCovar(params, times)
+		trajs = []
+		for i in range(0, num_trajs):
+			if t0 == 0:
+				trajs.append(np.array([0.] + list(chol_covar.dot(np.array(map(lambda x: stat.norm.rvs(loc=0, scale=1), range(0, len(times[1:]))))))))
+			else:
+				trajs.append(chol_covar.dot(np.array(map(lambda x: stat.norm.rvs(loc=0, scale=1), range(0, len(times))))))
+		return map(lambda x: Trajectory(map(lambda t, pos: [t, pos], times, x)), trajs)
+	@staticmethod
+	def getCholCovar(params, times):
+		covar = FractionalBrownianMotion1D.getCovar(params, times)
+		chol_covar = sp.linalg.cholesky(covar, lower=True)
+		return chol_covar
+	@staticmethod
+	def getCovar(params, times):
+		n = len(times)
+		sigma = params[0]
+		H = params[1]
+		two_H = 2 * H
+		t_pow_h = map(lambda t: math.pow(t, two_H), times)
+		half_sigma_sq = 0.5 * sigma * sigma
+		covar = np.zeros([n, n])
+		for i in range(0, n):
+			covar[i][i] = half_sigma_sq * 2 * t_pow_h[i]
+			for j in range(0, i):
+				covar[i][j] = half_sigma_sq * (t_pow_h[i] + t_pow_h[j] - math.pow(times[i] - times[j], two_H))
+				covar[j][i] = covar[i][j]
+		return covar
+	@staticmethod
+	def test(params=[1., .75], num_trajs=50):
+		trajs = FractionalBrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
+		s = Spider(trajectories=trajs)
+		sps = [bm, fbm, slm]
+		param_results = [[] for sp in sps]
+		results = []
+		for i in range(0, num_trajs):
+			print i
+			result = s.aicOneTrajectory1D(i, 0, sps=sps)
+			results.append(result)
+			for j in range(0, len(sps)):
+				param_results[j].append(result[j][2])
+		summarizeResultsList(results, sps)
 
 #for lm, we have to import a C library to compute the log-likelihood
 lmlib = np.ctypeslib.load_library('lm', '.')
@@ -267,6 +397,10 @@ lmLogLikelihood = lmlib.log_likelihood
 lmLogLikelihood.restype = ctypes.c_double
 lmLogLikelihood.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), ctypes.c_int]
 class LevyMotion1D(StochasticProcess):
+	def name(self):
+		return "Levy motion 1D"
+	def getNumParams(self):
+		return 3
 	def logPDF(self, params, trajectory):
 		dxs = trajectory.getDisplacements1D(0)
 		dts = trajectory.getDts()
@@ -285,6 +419,10 @@ symlmLogLikelihood = lmlib.sym_log_likelihood
 symlmLogLikelihood.restype = ctypes.c_double
 symlmLogLikelihood.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), np.ctypeslib.ndpointer(np.float64, ndim=1, flags='aligned'), ctypes.c_int]
 class SymmetricLevyMotion1D(LevyMotion1D):
+	def name(self):
+		return "Symmetric Levy motion 1D"
+	def getNumParams(self):
+		return 2
 	def logPDF(self, params, trajectory):
 		dxs = trajectory.getDisplacements1D(0)
 		dts = trajectory.getDts()
@@ -297,8 +435,43 @@ class SymmetricLevyMotion1D(LevyMotion1D):
 		return 0.
 	def getLambda(self, params):
 		return self.transformParam(params, 1)
+	@staticmethod
+	def getTrajectory(params, times, num_trajs=1):
+		"""Generates a trajectory of a Symmetric Levy Motion in 1 dimension.
+
+		times should all be non-negative and increasing
+		"""
+		if num_trajs > 1:
+			return map(lambda x: SymmetricLevyMotion1D.getTrajectory(params, times, num_trajs=1)[0], range(0, num_trajs))
+		else:
+			previousT = 0
+			alpha = params[0]
+			beta = 0
+			sigma = params[1]
+			x = [levy.random(alpha, -beta) * sigma * math.pow(times[0], 1. / alpha)]
+			for dt in diff(times):
+				x.append(x[-1] + levy.random(alpha, -beta) * sigma * math.pow(dt, 1. / alpha))
+			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
+	@staticmethod
+	def test(params=[1.5, 1.], num_trajs=50):
+		trajs = SymmetricLevyMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
+		s = Spider(trajectories=trajs)
+		sps = [bm, fbm, slm]
+		param_results = [[] for sp in sps]
+		results = []
+		for i in range(0, num_trajs):
+			print i
+			result = s.aicOneTrajectory1D(i, 0, sps=sps)
+			results.append(result)
+			for j in range(0, len(sps)):
+				param_results[j].append(result[j][2])
+		summarizeResultsList(results, sps)
 
 class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):
+	def name(self):
+		return "Symmetric Levy motion with drift 1D"
+	def getNumParams(self):
+		return 3
 	def logPDF(self, params, trajectory):
 		dxs = trajectory.getDisplacements1D(0)
 		dts = trajectory.getDts()
@@ -308,67 +481,11 @@ class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):
 	def getVelocity(self, params):
 		return self.transformParam(params, 2)
 
-#split to yaml converts the "tracks.txt" file output by I. Jankovic's split
-#code into spider yaml files
-def splitToYaml(filename):
-	infile = open(filename, "r")
-	data = infile.read()
-	infile.close()
-	bigArray = np.genfromtxt(StringIO(data), delimiter=",")
-	numTrajectories = int(bigArray[-1][-1])
-	listTrajectories = map(lambda x: [], range(0, numTrajectories))
-	for line in bigArray[1:]:
-		x = np.asscalar(line[0])
-		y = np.asscalar(line[1])
-		t = np.asscalar(line[-2])
-		trajNum = int(line[-1])
-		listTrajectories[trajNum-1].append([t, x, y])
-	#listTrajectories = [[[0, 0], [1, 1]], [[0, 0], [1, 1]]]
-	data = {"Trajectories": listTrajectories}
-	outfile = open(filename + ".yaml", "w")
-	yaml.dump(data, outfile)
-	outfile.close()
+def power_law_clock(t, params, firstParamIndex):
+	return math.pow(t, params[firstParamIndex])
 
-#split to yaml converts the "tracks.txt" file output by I. Jankovic's split
-#code into spider yaml files
-def fractureToYaml(filename):
-	infile = open(filename, "r")
-	data = infile.read()
-	infile.close()
-	bigArray = np.genfromtxt(StringIO(data), delimiter=" ")
-	numTrajectories = 1
-	listTrajectories = map(lambda x: [], range(0, numTrajectories))
-	for line in bigArray:
-		x = np.asscalar(line[2])
-		y = np.asscalar(line[3])
-		z = np.asscalar(line[4])
-		t = np.asscalar(line[-1])
-		listTrajectories[0].append([t, x, y, z])
-	#listTrajectories = [[[0, 0], [1, 1]], [[0, 0], [1, 1]]]
-	data = {"Trajectories": listTrajectories}
-	outfile = open(filename + ".yaml", "w")
-	yaml.dump(data, outfile)
-	outfile.close()
-
-def convertNataliiasData():
-	for i in range(1, 2784):
-		fractureToYaml("fracture/traject_" + str(i))
-
-def testCode():
-	#s = Spider("traject_1.yaml")
-	s = Spider("test.yaml")
-	bm = BrownianMotion1D([0.1], [10.0])
-	bmd = BrownianMotionWithDrift1D([0.1, -1], [10.0, 1])
-	fbm = FractionalBrownianMotion1D([0.1, 0.1], [10.0, 0.9])
-	lm = LevyMotion1D([0.5, -1., 0.1], [2.0, 1., 10.0])
-	slm = SymmetricLevyMotion1D([0.5, 0.1], [1.99, 10.0])
-	slmd = SymmetricLevyMotionWithDrift1D([0.5, 0.1, 0.1], [1.99, 10.0, 10.])
-	traj = s.getTrajectory(0)
-	#traj = BrownianMotion1D.getTrajectory([2.345], range(1, 100))
-	print "aicc: " + str(traj.aicc1D(0, [bm, bmd, fbm, slm, slmd]))
-
-#testCode()
 bm = BrownianMotion1D([0.1], [10.0])
+bmplc = StochasticProcessWithNonlinearClock(BrownianMotion1D, power_law_clock, [0.1, 0.5], [10.0, 1.5])
 bmd = BrownianMotionWithDrift1D([0.1, -10.], [10.0, 10.])
 fbm = FractionalBrownianMotion1D([0.1, 0.1], [10.0, 0.9])
 slm = SymmetricLevyMotion1D([0.5, 0.1], [1.999, 10.0])
@@ -382,101 +499,47 @@ slowslm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1], logParams=[False, T
 slowslmd = SymmetricLevyMotionWithDrift1D([0.5, 1e-20, -1], [1.999, 1e-1, 1.])
 slowSPs = [slowbm, slowbmd, slowfbm, slowslm, slowslmd]
 
-def testFracture():
-	s = Spider("traject_1.yaml", downsamples=100)
-	traj = s.getTrajectory(0)
-	results = traj.aic1D(0, [bm, bmd, fbm, slm])
-	return results
+def summarizeResultsList(results, sps):
+	num_trajs = len(results)
+	print num_trajs
+	#collect the parameters, ics and winner counts for each stochastic process
+	param_results = [[] for sp in sps]
+	ic_results = [[] for sp in sps]
+	winner_count = [0 for sp in sps]
+	for i in range(0, num_trajs):
+		result = results[i]
+		winner_index = 0
+		winner_ic = float("inf")
+		for j in range(0, len(sps)):
+			param_results[j].append(result[j][2])
+			ic_results[j].append(result[j][0])
+			if result[j][0] < winner_ic:
+				winner_ic = result[j][0]
+				winner_index = j
+		winner_count[winner_index] += 1
+	#print the average ICS
+	print "Mean IC result:"
+	for i in range(0, len(sps)):
+		print str(sum(ic_results[i]) / num_trajs) + " " + sps[i].name()
+	#determine the winner (the one with the best IC most often)
+	winner_index = 0
+	for i in range(1, len(sps)):
+		if winner_count[i] > winner_count[winner_index]:
+			winner_index = i
+	print sps[winner_index].name() + " is the winner."
+	#print the mean and variance for each of the parameters
+	param_avgs = map(lambda x: map(lambda y: np.mean(y), zip(*x)), param_results)
+	param_stds = map(lambda x: map(lambda y: np.std(y) , zip(*x)), param_results)
+	for i in range(0, len(sps)):
+		print "Average ML parameters for " + sps[i].name() + ":"
+		for j in range(0, len(param_avgs[i])):
+			print str(param_avgs[i][j]) + "+-" + str(param_stds[i][j])
+	#make a scatter plot of the first two params if possible
+	if len(param_results[winner_index][0]) > 1:
+		plt.scatter(map(lambda i: param_results[winner_index][i][0], range(0, num_trajs)), map(lambda i: param_results[winner_index][i][1], range(0, num_trajs)))
+		plt.show()
 
-def runFracture(filenum, posIndex=0):
-	s = Spider("fracture/traject_" + str(filenum) + ".yaml", downsamples=50)
-	traj = s.getTrajectory(0)
-	traj = traj.getTrajectory1D(posIndex)
-	results = traj.aic1D(0, [bm, bmd, fbm, slm])
-	minaic = results[0][0]
-	for i in range(1, 4):
-		if results[i][0] < minaic:
-			minaic = results[i][0]
-	outfile = open("fracture/traject_" + str(filenum) + ".results" + str(posIndex), "w")
-	for i in range(0, 4):
-		if results[i][0] == minaic:
-			if i == 0:
-				outfile.write("BM\n")
-			if i == 1:
-				outfile.write("BMD\n")
-			if i == 2:
-				outfile.write("FBM\n")
-			if i == 3:
-				outfile.write("SLM\n")
-	outfile.write("BM " + str(results[0][0]) + "\n")
-	outfile.write(str(results[0][2][0]) + "\n")
-	outfile.write("BMD " + str(results[1][0]) + "\n")
-	outfile.write(str(results[1][2][0]) + " " + str(results[1][2][1]) + "\n")
-	outfile.write("FBM " + str(results[2][0]) + "\n")
-	outfile.write(str(results[2][2][0]) + " " + str(results[2][2][1]) + "\n")
-	outfile.write("SLM " + str(results[3][0]) + "\n")
-	outfile.write(str(results[3][2][0]) + " " + str(results[3][2][1]) + "\n")
-	outfile.close()
-
-def runFracture1(i):
-	runFracture(i, 1)
-
-def runFracture2(i):
-	runFracture(i, 2)
-
-def runFractures():
-	n = 2784
-	#n = 6
-	pool = multiprocessing.Pool(4)
-	pool.map(runFracture, range(1, n))
-	pool.map(runFracture1, range(1, n))
-	pool.map(runFracture2, range(1, n))
-	#pool.map(runFracture, range(1, n), map(lambda x: 0, range(1, n)))
-	#pool.map(runFracture, range(1, n), map(lambda x: 1, range(1, n)))
-	#pool.map(runFracture, range(1, n), map(lambda x: 2, range(1, n)))
-
-#runFractures()
-
-def runSplit():
-	n = 100
-	pool = multiprocessing.Pool(4)
-	pool.map(runSplitSupport, range(0, n))
-
-def runSplitSupport(k):
-	s = Spider("split/tracks.txt.yaml", downsamples=50)
-	traj2D = s.getTrajectory(k)
-	if traj2D.getPositions1D(0)[-1] > 0:
-		for j in range(0, 2):
-			traj = traj2D.getTrajectory1D(j)
-			results = traj.aic1D(0, [slowbm, slowbmd, slowfbm, slowslm])
-			minaic = results[0][0]
-			for i in range(1, 4):
-				if results[i][0] < minaic:
-					minaic = results[i][0]
-			outfile = open("split/traject_" + str(k) + ".results" + str(j), "w")
-			for i in range(0, 4):
-				if results[i][0] == minaic:
-					if i == 0:
-						outfile.write("BM\n")
-					if i == 1:
-						outfile.write("BMD\n")
-					if i == 2:
-						outfile.write("FBM\n")
-					if i == 3:
-						outfile.write("SLM\n")
-			outfile.write("BM " + str(results[0][0]) + "\n")
-			outfile.write(str(results[0][2][0]) + "\n")
-			outfile.write("BMD " + str(results[1][0]) + "\n")
-			outfile.write(str(results[1][2][0]) + " " + str(results[1][2][1]) + "\n")
-			outfile.write("FBM " + str(results[2][0]) + "\n")
-			outfile.write(str(results[2][2][0]) + " " + str(results[2][2][1]) + "\n")
-			outfile.write("SLM " + str(results[3][0]) + "\n")
-			outfile.write(str(results[3][2][0]) + " " + str(results[3][2][1]) + "\n")
-			outfile.close()
-
-#runSplit()
-
-def summarizeResults(folder):
+def summarizeResultsFolder(folder):
 	lsOutput = subprocess.check_output("ls -1 " + folder + "/*.results2", shell=True)
 	filenames = lsOutput.split('\n')
 	winnerCount = {}
