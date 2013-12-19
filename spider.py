@@ -62,7 +62,7 @@ class Spider:
 			result = self.getTrajectory(trajIndex).aic1D(posIndex, [sp])[0]
 			results.append(result)
 		return results
-	def getResults(self, num_procs=4):
+	def getResults(self, num_procs=4, plot=True):
 		num_trajs = len(self.trajectories)
 		sps = [bm, fbm, slm, bmplc]
 		param_results = [[] for sp in sps]
@@ -70,25 +70,17 @@ class Spider:
 		#results = pool.map(self.aicOneTrajectory1DStar, zip([self for i in range(0, num_trajs)], range(0, num_trajs), [0 for i in range(0, num_trajs)], [sps for i in range(0, num_trajs)]))
 		results = pool.map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, num_trajs), itertools.repeat(0), itertools.repeat(sps)))
 		#results = map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, num_trajs), itertools.repeat(0), itertools.repeat(sps)))
-		"""
-		results = []
-		for i in range(0, num_trajs):
-			result = self.aicOneTrajectory1D(i, 0, sps=sps)
-			results.append(result)
-			for j in range(0, len(sps)):
-				param_results[j].append(result[j][2])
-		"""
-		summarizeResultsList(results, sps)
+		summarizeResultsList(results, sps, plot=plot)
 	@staticmethod
 	def runTests():
 		print "Testing with Brownian motion"
-		BrownianMotion1D.test()
+		BrownianMotion1D.test(plot=False)
 		print "Testing with fractional Brownian motion"
-		FractionalBrownianMotion1D.test()
+		FractionalBrownianMotion1D.test(plot=False)
 		print "Testing with symmetric Levy motion"
-		SymmetricLevyMotion1D.test()
+		SymmetricLevyMotion1D.test(plot=False)
 		print "Testing with Brownian motion with a power-law clock"
-		StochasticProcessWithNonlinearClock.test()
+		StochasticProcessWithNonlinearClock.test(plot=False)
 
 def spideraicOneTrajectory1DStar(args):
 	return Spider.aicOneTrajectory1D(*args)
@@ -261,21 +253,10 @@ class StochasticProcessWithNonlinearClock(StochasticProcess):
 		nlcTrajectories = map(lambda x: Trajectory(map(list, zip(times, *x))), map(lambda y: y.getPositions(), parentTrajectories))
 		return nlcTrajectories
 	@staticmethod
-	def test(params=[1., 0.5], num_trajs=100):
+	def test(params=[1., 0.5], num_trajs=100, plot=True):
 		trajs = StochasticProcessWithNonlinearClock.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs, parentProcessClass=BrownianMotion1D)
 		s = Spider(trajectories=trajs)
-		s.getResults()
-		"""
-		sps = [bmplc, bm, fbm, slm]
-		param_results = [[] for sp in sps]
-		results = []
-		for i in range(0, num_trajs):
-			result = s.aicOneTrajectory1D(i, 0, sps=sps)
-			results.append(result)
-			for j in range(0, len(sps)):
-				param_results[j].append(result[j][2])
-		summarizeResultsList(results, sps)
-		"""
+		s.getResults(plot=plot)
 
 class BrownianMotion1D(StochasticProcess):
 	def name(self):
@@ -310,22 +291,10 @@ class BrownianMotion1D(StochasticProcess):
 				x.append(stat.norm.rvs(loc=x[-1], scale=sigma * math.sqrt(dt)))
 			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
 	@staticmethod
-	def test(params=[1.], num_trajs=100):
+	def test(params=[1.], num_trajs=100, plot=True):
 		trajs = BrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
-		s.getResults()
-		"""
-		sps = [bm, fbm, slm]
-		param_results = [[] for sp in sps]
-		results = []
-		for i in range(0, num_trajs):
-			print i
-			result = s.aicOneTrajectory1D(i, 0, sps=sps)
-			results.append(result)
-			for j in range(0, len(sps)):
-				param_results[j].append(result[j][2])
-		summarizeResultsList(results, sps)
-		"""
+		s.getResults(plot=plot)
 
 class BrownianMotionWithDrift1D(BrownianMotion1D):
 	def name(self):
@@ -413,22 +382,10 @@ class FractionalBrownianMotion1D(StochasticProcess):
 				covar[j][i] = covar[i][j]
 		return covar
 	@staticmethod
-	def test(params=[1., .75], num_trajs=100):
+	def test(params=[1., .75], num_trajs=100, plot=True):
 		trajs = FractionalBrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
-		s.getResults()
-		"""
-		sps = [bm, fbm, slm]
-		param_results = [[] for sp in sps]
-		results = []
-		for i in range(0, num_trajs):
-			print i
-			result = s.aicOneTrajectory1D(i, 0, sps=sps)
-			results.append(result)
-			for j in range(0, len(sps)):
-				param_results[j].append(result[j][2])
-		summarizeResultsList(results, sps)
-		"""
+		s.getResults(plot=plot)
 
 #for lm, we have to import a C library to compute the log-likelihood
 lmlib = np.ctypeslib.load_library('lm', '.')
@@ -492,22 +449,10 @@ class SymmetricLevyMotion1D(LevyMotion1D):
 				x.append(x[-1] + levy.random(alpha, -beta) * sigma * math.pow(dt, 1. / alpha))
 			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
 	@staticmethod
-	def test(params=[1.5, 1.], num_trajs=100):
+	def test(params=[1.5, 1.], num_trajs=100, plot=True):
 		trajs = SymmetricLevyMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
-		s.getResults()
-		"""
-		sps = [bm, fbm, slm]
-		param_results = [[] for sp in sps]
-		results = []
-		for i in range(0, num_trajs):
-			print i
-			result = s.aicOneTrajectory1D(i, 0, sps=sps)
-			results.append(result)
-			for j in range(0, len(sps)):
-				param_results[j].append(result[j][2])
-		summarizeResultsList(results, sps)
-		"""
+		s.getResults(plot=plot)
 
 class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):
 	def name(self):
@@ -541,7 +486,7 @@ slowslm = SymmetricLevyMotion1D([0.5, 1e-20], [1.999, 1e-1], logParams=[False, T
 slowslmd = SymmetricLevyMotionWithDrift1D([0.5, 1e-20, -1], [1.999, 1e-1, 1.])
 slowSPs = [slowbm, slowbmd, slowfbm, slowslm, slowslmd]
 
-def summarizeResultsList(results, sps):
+def summarizeResultsList(results, sps, plot=True):
 	num_trajs = len(results)
 	print num_trajs
 	#collect the parameters, ics and winner counts for each stochastic process
@@ -577,7 +522,7 @@ def summarizeResultsList(results, sps):
 		for j in range(0, len(param_avgs[i])):
 			print str(param_avgs[i][j]) + " +- " + str(param_stds[i][j])
 	#make a scatter plot of the first two params if possible
-	if len(param_results[winner_index][0]) > 1:
+	if len(param_results[winner_index][0]) > 1 and plot == True:
 		plt.scatter(map(lambda i: param_results[winner_index][i][0], range(0, num_trajs)), map(lambda i: param_results[winner_index][i][1], range(0, num_trajs)))
 		plt.show()
 
