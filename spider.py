@@ -488,7 +488,6 @@ slowSPs = [slowbm, slowbmd, slowfbm, slowslm, slowslmd]
 
 def summarizeResultsList(results, sps, plot=True):
 	numTrajs = len(results)
-	print numTrajs
 	#collect the parameters, ics and winner counts for each stochastic process
 	param_results = [[] for sp in sps]
 	ic_results = [[] for sp in sps]
@@ -514,6 +513,8 @@ def summarizeResultsList(results, sps, plot=True):
 		if winner_count[i] > winner_count[winner_index]:
 			winner_index = i
 	print sps[winner_index].name() + " is the winner."
+	for i in range(0, len(sps)):
+		print str(winner_count[i]) + " wins for " + sps[i].name()
 	#print the mean and variance for each of the parameters
 	param_avgs = map(lambda x: map(lambda y: np.mean(y), zip(*x)), param_results)
 	param_stds = map(lambda x: map(lambda y: np.std(y) , zip(*x)), param_results)
