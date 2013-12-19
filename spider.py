@@ -12,6 +12,7 @@ import subprocess
 from StringIO import StringIO
 import matplotlib.pyplot as plt
 import levy
+import itertools
 
 def subselect(lst, indices):
 	return map(lambda x: x[1], filter(lambda y: y[0] in indices, enumerate(lst)))
@@ -60,8 +61,37 @@ class Spider:
 		for sp in sps:
 			result = self.getTrajectory(trajIndex).aic1D(posIndex, [sp])[0]
 			results.append(result)
-			#print result
 		return results
+	def getResults(self, num_procs=4):
+		num_trajs = len(self.trajectories)
+		sps = [bm, fbm, slm, bmplc]
+		param_results = [[] for sp in sps]
+		pool = multiprocessing.Pool(num_procs)
+		#results = pool.map(self.aicOneTrajectory1DStar, zip([self for i in range(0, num_trajs)], range(0, num_trajs), [0 for i in range(0, num_trajs)], [sps for i in range(0, num_trajs)]))
+		results = pool.map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, num_trajs), itertools.repeat(0), itertools.repeat(sps)))
+		#results = map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, num_trajs), itertools.repeat(0), itertools.repeat(sps)))
+		"""
+		results = []
+		for i in range(0, num_trajs):
+			result = self.aicOneTrajectory1D(i, 0, sps=sps)
+			results.append(result)
+			for j in range(0, len(sps)):
+				param_results[j].append(result[j][2])
+		"""
+		summarizeResultsList(results, sps)
+	@staticmethod
+	def runTests():
+		print "Testing with Brownian motion"
+		BrownianMotion1D.test()
+		print "Testing with fractional Brownian motion"
+		FractionalBrownianMotion1D.test()
+		print "Testing with symmetric Levy motion"
+		SymmetricLevyMotion1D.test()
+		print "Testing with Brownian motion with a power-law clock"
+		StochasticProcessWithNonlinearClock.test()
+
+def spideraicOneTrajectory1DStar(args):
+	return Spider.aicOneTrajectory1D(*args)
 
 class Trajectory:
 	dim = 0
@@ -231,9 +261,11 @@ class StochasticProcessWithNonlinearClock(StochasticProcess):
 		nlcTrajectories = map(lambda x: Trajectory(map(list, zip(times, *x))), map(lambda y: y.getPositions(), parentTrajectories))
 		return nlcTrajectories
 	@staticmethod
-	def test(params=[1., 1.5], num_trajs=50):
+	def test(params=[1., 0.5], num_trajs=100):
 		trajs = StochasticProcessWithNonlinearClock.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs, parentProcessClass=BrownianMotion1D)
 		s = Spider(trajectories=trajs)
+		s.getResults()
+		"""
 		sps = [bmplc, bm, fbm, slm]
 		param_results = [[] for sp in sps]
 		results = []
@@ -243,6 +275,7 @@ class StochasticProcessWithNonlinearClock(StochasticProcess):
 			for j in range(0, len(sps)):
 				param_results[j].append(result[j][2])
 		summarizeResultsList(results, sps)
+		"""
 
 class BrownianMotion1D(StochasticProcess):
 	def name(self):
@@ -277,9 +310,11 @@ class BrownianMotion1D(StochasticProcess):
 				x.append(stat.norm.rvs(loc=x[-1], scale=sigma * math.sqrt(dt)))
 			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
 	@staticmethod
-	def test(params=[1.], num_trajs=50):
+	def test(params=[1.], num_trajs=100):
 		trajs = BrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
+		s.getResults()
+		"""
 		sps = [bm, fbm, slm]
 		param_results = [[] for sp in sps]
 		results = []
@@ -290,6 +325,7 @@ class BrownianMotion1D(StochasticProcess):
 			for j in range(0, len(sps)):
 				param_results[j].append(result[j][2])
 		summarizeResultsList(results, sps)
+		"""
 
 class BrownianMotionWithDrift1D(BrownianMotion1D):
 	def name(self):
@@ -377,9 +413,11 @@ class FractionalBrownianMotion1D(StochasticProcess):
 				covar[j][i] = covar[i][j]
 		return covar
 	@staticmethod
-	def test(params=[1., .75], num_trajs=50):
+	def test(params=[1., .75], num_trajs=100):
 		trajs = FractionalBrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
+		s.getResults()
+		"""
 		sps = [bm, fbm, slm]
 		param_results = [[] for sp in sps]
 		results = []
@@ -390,6 +428,7 @@ class FractionalBrownianMotion1D(StochasticProcess):
 			for j in range(0, len(sps)):
 				param_results[j].append(result[j][2])
 		summarizeResultsList(results, sps)
+		"""
 
 #for lm, we have to import a C library to compute the log-likelihood
 lmlib = np.ctypeslib.load_library('lm', '.')
@@ -453,9 +492,11 @@ class SymmetricLevyMotion1D(LevyMotion1D):
 				x.append(x[-1] + levy.random(alpha, -beta) * sigma * math.pow(dt, 1. / alpha))
 			return [Trajectory(map(lambda t, pos: [t, pos], times, x))]
 	@staticmethod
-	def test(params=[1.5, 1.], num_trajs=50):
+	def test(params=[1.5, 1.], num_trajs=100):
 		trajs = SymmetricLevyMotion1D.getTrajectory(params, np.arange(0, 10, .1), num_trajs=num_trajs)
 		s = Spider(trajectories=trajs)
+		s.getResults()
+		"""
 		sps = [bm, fbm, slm]
 		param_results = [[] for sp in sps]
 		results = []
@@ -466,6 +507,7 @@ class SymmetricLevyMotion1D(LevyMotion1D):
 			for j in range(0, len(sps)):
 				param_results[j].append(result[j][2])
 		summarizeResultsList(results, sps)
+		"""
 
 class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):
 	def name(self):
@@ -485,7 +527,7 @@ def power_law_clock(t, params, firstParamIndex):
 	return math.pow(t, params[firstParamIndex])
 
 bm = BrownianMotion1D([0.1], [10.0])
-bmplc = StochasticProcessWithNonlinearClock(BrownianMotion1D, power_law_clock, [0.1, 0.5], [10.0, 1.5])
+bmplc = StochasticProcessWithNonlinearClock(BrownianMotion1D, power_law_clock, [0.1, 0.25], [10.0, 1.0])
 bmd = BrownianMotionWithDrift1D([0.1, -10.], [10.0, 10.])
 fbm = FractionalBrownianMotion1D([0.1, 0.1], [10.0, 0.9])
 slm = SymmetricLevyMotion1D([0.5, 0.1], [1.999, 10.0])
@@ -533,7 +575,7 @@ def summarizeResultsList(results, sps):
 	for i in range(0, len(sps)):
 		print "Average ML parameters for " + sps[i].name() + ":"
 		for j in range(0, len(param_avgs[i])):
-			print str(param_avgs[i][j]) + "+-" + str(param_stds[i][j])
+			print str(param_avgs[i][j]) + " +- " + str(param_stds[i][j])
 	#make a scatter plot of the first two params if possible
 	if len(param_results[winner_index][0]) > 1:
 		plt.scatter(map(lambda i: param_results[winner_index][i][0], range(0, num_trajs)), map(lambda i: param_results[winner_index][i][1], range(0, num_trajs)))
