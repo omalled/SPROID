@@ -40,7 +40,7 @@ def aicc(maximumLogLikelihood, numParameters, numSamples):
 	correction = 2. * numParameters * (numParameters + 1.) / (numSamples - numParameters - 1.)
 	return aic(maximumLogLikelihood, numParameters) + correction
 
-class Spider:
+class Sproid:
 	trajectories = []
 	def __init__(self, filename=[], downsamples=[], trajectories=[]):
 		self.trajectories = trajectories
@@ -48,6 +48,18 @@ class Spider:
 			stream = file(filename, "r")
 			data = yaml.load(stream)
 			self.trajectories.extend(map(lambda x: Trajectory(x, downsamples), data["Trajectories"]))
+	def dump(self, filename):
+		listTrajectories = []
+		for i in range(0, len(self.trajectories)):
+			listTrajectory = map(lambda x: [x], self.trajectories[i].getTimes())
+			for j in range(0, self.trajectories[i].getDim()):
+				for k in range(0, len(listTrajectory)):
+					listTrajectory[k].append(self.trajectories[i].getPositions1D(j)[k])
+			listTrajectories.append(listTrajectory)
+		data = {"Trajectories": listTrajectories}
+		outfile = open(filename, "w")
+		outfile.write(yaml.dump(data))
+		outfile.close()
 	def getTrajectories(self):
 		return self.trajectories
 	def getTrajectory(self, i):
@@ -62,14 +74,15 @@ class Spider:
 			result = self.getTrajectory(trajIndex).aic1D(posIndex, [sp])[0]
 			results.append(result)
 		return results
-	def getResults(self, num_procs=4, plot=True):
+	def getResults(self, num_procs=4, plot=True, sps=[]):
 		numTrajs = len(self.trajectories)
-		sps = [bm, fbm, slm, bmplc]
+		if sps == []:
+			sps = [bm, fbm, slm, bmplc]
 		param_results = [[] for sp in sps]
 		pool = multiprocessing.Pool(num_procs)
 		#results = pool.map(self.aicOneTrajectory1DStar, zip([self for i in range(0, numTrajs)], range(0, numTrajs), [0 for i in range(0, numTrajs)], [sps for i in range(0, numTrajs)]))
-		results = pool.map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
-		#results = map(spideraicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
+		results = pool.map(sproidaicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
+		#results = map(sproidaicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
 		summarizeResultsList(results, sps, plot=plot)
 	@staticmethod
 	def runTests(numTrajs=100):
@@ -82,8 +95,8 @@ class Spider:
 		print "Testing with Brownian motion with a power-law clock"
 		StochasticProcessWithNonlinearClock.test(plot=False, numTrajs=numTrajs)
 
-def spideraicOneTrajectory1DStar(args):
-	return Spider.aicOneTrajectory1D(*args)
+def sproidaicOneTrajectory1DStar(args):
+	return Sproid.aicOneTrajectory1D(*args)
 
 class Trajectory:
 	dim = 0
@@ -255,7 +268,7 @@ class StochasticProcessWithNonlinearClock(StochasticProcess):
 	@staticmethod
 	def test(params=[1., 0.5], numTrajs=100, plot=True):
 		trajs = StochasticProcessWithNonlinearClock.getTrajectory(params, np.arange(0, 10, .1), numTrajs=numTrajs, parentProcessClass=BrownianMotion1D)
-		s = Spider(trajectories=trajs)
+		s = Sproid(trajectories=trajs)
 		s.getResults(plot=plot)
 
 class BrownianMotion1D(StochasticProcess):
@@ -293,7 +306,7 @@ class BrownianMotion1D(StochasticProcess):
 	@staticmethod
 	def test(params=[1.], numTrajs=100, plot=True):
 		trajs = BrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), numTrajs=numTrajs)
-		s = Spider(trajectories=trajs)
+		s = Sproid(trajectories=trajs)
 		s.getResults(plot=plot)
 
 class BrownianMotionWithDrift1D(BrownianMotion1D):
@@ -384,7 +397,7 @@ class FractionalBrownianMotion1D(StochasticProcess):
 	@staticmethod
 	def test(params=[1., .75], numTrajs=100, plot=True):
 		trajs = FractionalBrownianMotion1D.getTrajectory(params, np.arange(0, 10, .1), numTrajs=numTrajs)
-		s = Spider(trajectories=trajs)
+		s = Sproid(trajectories=trajs)
 		s.getResults(plot=plot)
 
 #for lm, we have to import a C library to compute the log-likelihood
@@ -451,7 +464,7 @@ class SymmetricLevyMotion1D(LevyMotion1D):
 	@staticmethod
 	def test(params=[1.5, 1.], numTrajs=100, plot=True):
 		trajs = SymmetricLevyMotion1D.getTrajectory(params, np.arange(0, 10, .1), numTrajs=numTrajs)
-		s = Spider(trajectories=trajs)
+		s = Sproid(trajectories=trajs)
 		s.getResults(plot=plot)
 
 class SymmetricLevyMotionWithDrift1D(SymmetricLevyMotion1D):

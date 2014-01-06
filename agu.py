@@ -1,7 +1,7 @@
 #This is the code that was used to run the agu examples.
 
 #split to yaml converts the "tracks.txt" file output by I. Jankovic's split
-#code into spider yaml files
+#code into sproid yaml files
 def splitToYaml(filename):
 	infile = open(filename, "r")
 	data = infile.read()
@@ -22,7 +22,7 @@ def splitToYaml(filename):
 	outfile.close()
 
 #split to yaml converts the "tracks.txt" file output by I. Jankovic's split
-#code into spider yaml files
+#code into sproid yaml files
 def fractureToYaml(filename):
 	infile = open(filename, "r")
 	data = infile.read()
@@ -47,13 +47,13 @@ def convertNataliiasData():
 		fractureToYaml("fracture/traject_" + str(i))
 
 def testFracture():
-	s = Spider(filename="traject_1.yaml", downsamples=100)
+	s = Sproid(filename="traject_1.yaml", downsamples=100)
 	traj = s.getTrajectory(0)
 	results = traj.aic1D(0, [bm, bmd, fbm, slm])
 	return results
 
 def runFracture(filenum, posIndex=0):
-	s = Spider(filename="fracture/traject_" + str(filenum) + ".yaml", downsamples=50)
+	s = Sproid(filename="fracture/traject_" + str(filenum) + ".yaml", downsamples=50)
 	traj = s.getTrajectory(0)
 	traj = traj.getTrajectory1D(posIndex)
 	results = traj.aic1D(0, [bm, bmd, fbm, slm])
@@ -107,7 +107,7 @@ def runSplit():
 	pool.map(runSplitSupport, range(0, n))
 
 def runSplitSupport(k):
-	s = Spider(filename="split/tracks.txt.yaml", downsamples=50)
+	s = Sproid(filename="split/tracks.txt.yaml", downsamples=50)
 	traj2D = s.getTrajectory(k)
 	if traj2D.getPositions1D(0)[-1] > 0:
 		for j in range(0, 2):

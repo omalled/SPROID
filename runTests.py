@@ -1,3 +1,3 @@
-import spider
+import sproid
 
-spider.Spider.runTests(numTrajs=100)
+sproid.Sproid.runTests(numTrajs=100)
