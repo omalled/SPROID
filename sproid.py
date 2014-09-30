@@ -74,14 +74,14 @@ class Sproid:
 			result = self.getTrajectory(trajIndex).aic1D(posIndex, [sp])[0]
 			results.append(result)
 		return results
-	def getResults(self, num_procs=4, plot=True, sps=[]):
+	def getResults(self, num_procs=4, plot=True, sps=[], posIndex=0):
 		numTrajs = len(self.trajectories)
 		if sps == []:
 			sps = [bm, fbm, slm, bmplc]
 		param_results = [[] for sp in sps]
 		pool = multiprocessing.Pool(num_procs)
 		#results = pool.map(self.aicOneTrajectory1DStar, zip([self for i in range(0, numTrajs)], range(0, numTrajs), [0 for i in range(0, numTrajs)], [sps for i in range(0, numTrajs)]))
-		results = pool.map(sproidaicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
+		results = pool.map(sproidaicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(posIndex), itertools.repeat(sps)))
 		#results = map(sproidaicOneTrajectory1DStar, itertools.izip(itertools.repeat(self), range(0, numTrajs), itertools.repeat(0), itertools.repeat(sps)))
 		summarizeResultsList(results, sps, plot=plot)
 	@staticmethod
