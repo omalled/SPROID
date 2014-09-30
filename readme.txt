@@ -2,10 +2,13 @@
 After the software has been downloaded and extracted, it is necessary to build shared libraries.
 This is achieved by running
 	make
+This has been tested on a Mac.
+If problems are encountered, please contact omalled@lanl.gov.
 
 2. Testing
 To test the setup, run
 	python runTests.py
+This may take a while depending on the speed of the computer and the number of processors available.
 
 3. Using
 To use SPROID, trajectory data should be entered in a YAML format (see http://yaml.org).
